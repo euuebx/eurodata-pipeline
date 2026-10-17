@@ -99,4 +99,5 @@ The table has a unique constraint on `(currency, observation_date)`. This is wha
 
 ## Data source
 
-ECB Data Portal API
+
+[ECB Data Portal API](https://data.ecb.europa.eu/help/api/overview)

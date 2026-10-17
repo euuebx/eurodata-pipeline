@@ -169,7 +169,7 @@ The Compose setup starts PostgreSQL, runs a one-off ingestion container to load 
 │   └── test_pipeline.py
 ├── Dockerfile
 ├── docker-compose.yml
-├── Makefile
+
 └── pyproject.toml
 ```
 
@@ -193,9 +193,10 @@ The Compose setup starts PostgreSQL, runs a one-off ingestion container to load 
 
 ## CV wording (use only after you have run and verified the project)
 
-**EuroData Pipeline & Analytics API | Python, SQL, FastAPI, SQLAlchemy, PostgreSQL, Docker**
+**EuroData Pipeline & Analytics API | Python, SQL, FastAPI, SQLAlchemy, pandas**
+
 - Built an ETL pipeline ingesting real ECB exchange-rate observations, validating and deduplicating records before idempotent database upserts.
 - Developed a REST API with date/currency filtering, pagination, latest-rate queries and health/summary endpoints.
-- Added automated tests and CI checks; packaged the API and PostgreSQL database with Docker Compose.
+- Added automated tests and CI checks (pytest, Ruff, GitHub Actions).
 
 Do not claim a record count, performance improvement, cloud deployment or production usage unless you measure and verify it yourself.

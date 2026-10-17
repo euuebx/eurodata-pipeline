@@ -1,0 +1,201 @@
+# EuroData Pipeline & Analytics API
+
+A portfolio-grade, reproducible data engineering project that downloads **real daily exchange-rate observations** from the European Central Bank (ECB), validates and stores them in a relational database, and exposes the resulting data through a documented REST API.
+
+> **Data provenance:** observations come from the ECB Data Portal API. The repository does not contain invented or synthetic market observations. Tests use small, explicitly constructed fixtures only to verify application behaviour; they are not presented as real-world data.
+
+## What it demonstrates
+
+- API ingestion with timeouts and HTTP error handling
+- Data validation, type conversion and duplicate removal
+- Idempotent database upserts (safe to run the pipeline more than once)
+- SQLAlchemy schema, unique constraints and indexes
+- REST API with filters, pagination, summary and health endpoints
+- Automated tests for ingestion/upsert and API behaviour
+- Docker Compose deployment with PostgreSQL
+- Continuous integration using GitHub Actions and Ruff
+
+## Architecture
+
+```text
+ECB Data Portal API (daily USD, GBP, JPY, CHF exchange rates against EUR)
+              |
+              v
+       HTTP ingestion (requests)
+              |
+              v
+   Validate / clean / deduplicate (pandas)
+              |
+              v
+       SQLAlchemy upsert layer
+              |
+              v
+       SQLite (local) / PostgreSQL (Docker)
+              |
+              v
+         FastAPI REST service
+              |
+              v
+  /v1/rates  /v1/rates/latest  /v1/summary  /health
+```
+
+## Data source
+
+The pipeline requests the ECB `EXR` daily exchange-rate series for USD, GBP, JPY and CHF against EUR. The rates are quoted as units of the foreign currency per EUR, as specified by the ECB series dimensions. The project keeps the observation date, currency, base currency, numeric rate, source and ingestion timestamp.
+
+Official documentation:
+- [ECB Data Portal API overview](https://data.ecb.europa.eu/help/api/overview)
+- [ECB data API query format and parameters](https://data.ecb.europa.eu/help/api/data)
+- [ECB content negotiation and CSV formats](https://data.ecb.europa.eu/help/api/content-negotiation)
+
+Data are fetched at runtime; you need an internet connection to run ingestion. The API can still serve previously ingested data when the upstream ECB service is temporarily unavailable.
+
+## Requirements
+
+- Python 3.11 or newer
+- Internet access for ingestion
+- Optional: Docker Desktop for the PostgreSQL deployment
+
+## Run locally on Windows (PowerShell)
+
+Open PowerShell in the project directory.
+
+### 1. Create a virtual environment
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+```
+
+If PowerShell blocks activation, use this alternative in the same project directory:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+```
+
+### 2. Ingest real ECB data
+
+```powershell
+python -m eurodata_pipeline.cli --start-date 2020-01-01 --verbose
+```
+
+You should see a JSON summary containing counts of received, inserted, updated and unchanged observations, plus currencies and the date range. Exact counts depend on the live ECB response and can change as data are revised. The default local database is `eurodata.db` in the current directory.
+
+To limit the request to a period:
+
+```powershell
+python -m eurodata_pipeline.cli --start-date 2024-01-01 --end-date 2024-12-31 --verbose
+```
+
+### 3. Start the API
+
+```powershell
+uvicorn eurodata_pipeline.api:app --reload
+```
+
+Open these URLs in your browser:
+
+- API documentation: http://127.0.0.1:8000/docs
+- Health check: http://127.0.0.1:8000/health
+- Latest observation for each currency: http://127.0.0.1:8000/v1/rates/latest
+- Summary: http://127.0.0.1:8000/v1/summary
+- USD rates: http://127.0.0.1:8000/v1/rates?currency=USD&limit=20
+- Date filter: http://127.0.0.1:8000/v1/rates?currency=USD&start_date=2024-01-01&end_date=2024-12-31
+
+Example API query using PowerShell:
+
+```powershell
+Invoke-RestMethod "http://127.0.0.1:8000/v1/rates/latest"
+```
+
+## Run tests
+
+The tests do not need the ECB API or a running PostgreSQL server. They use an isolated in-memory SQLite database and test fixtures.
+
+```powershell
+pytest -q
+ruff check src tests
+```
+
+## Run with Docker Compose (PostgreSQL)
+
+Install and start Docker Desktop, then from the project directory run:
+
+```powershell
+docker compose up --build -d
+```
+
+The API will be available at http://127.0.0.1:8000/docs. The PostgreSQL database is persisted in a Docker volume. To stop the services:
+
+```powershell
+docker compose down
+```
+
+To remove the database volume as well (this deletes the local Docker database data):
+
+```powershell
+docker compose down -v
+```
+
+The Compose setup starts PostgreSQL, runs a one-off ingestion container to load live ECB data, and starts the API. The ingestion container exits after a successful load; rerun it later with `docker compose run --rm ingest` to refresh the data. The simple Windows SQLite route above is the quickest way to demonstrate the full pipeline.
+
+## API endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/health` | Verify API and database connectivity |
+| GET | `/v1/rates` | List observations; filter by currency/date; paginate |
+| GET | `/v1/rates/latest` | Latest stored observation per currency |
+| GET | `/v1/summary` | Record count, currencies and stored date range |
+
+`/v1/rates` supports `currency`, `start_date`, `end_date`, `limit` (1–1000) and `offset`. Invalid date ranges return HTTP 422.
+
+## Repository structure
+
+```text
+.
+├── .github/workflows/tests.yml  # CI: tests and lint
+├── src/eurodata_pipeline/
+│   ├── api.py                    # FastAPI routes and response schemas
+│   ├── cli.py                    # Ingestion command line
+│   ├── config.py                 # Environment-based settings
+│   ├── db.py                     # SQLAlchemy engine/session
+│   ├── models.py                 # Database schema
+│   └── pipeline.py               # ECB fetch, validation and upsert
+├── tests/
+│   ├── test_api.py
+│   └── test_pipeline.py
+├── Dockerfile
+├── docker-compose.yml
+├── Makefile
+└── pyproject.toml
+```
+
+## Engineering decisions and limitations
+
+- **Idempotency:** `(currency, observation_date)` is unique. Re-running ingestion does not create duplicate records; changed upstream values update existing records.
+- **No fabricated project data:** ingestion uses the live ECB service. Test fixtures are explicitly test-only.
+- **SQLite for easy local setup:** PostgreSQL is provided for a more production-like environment.
+- **No authentication:** endpoints are intended for local/demo use, not public deployment with sensitive data.
+- **Not a high-availability system:** no scheduler, queue, cloud infrastructure or production secrets management is configured by default.
+- **ECB data are revised:** current observations may differ from previously downloaded values. The project stores the latest value returned by the API rather than maintaining a full revision history.
+- **Rate conventions matter:** these ECB series express the rate as foreign-currency units per EUR. Do not interpret the value as EUR per unit of foreign currency.
+
+## Suggested future extensions
+
+1. Add a scheduled ingestion workflow and incremental watermark.
+2. Add database migrations with Alembic.
+3. Add structured metrics and pipeline-run history.
+4. Add integration tests against a temporary PostgreSQL service in CI.
+5. Add a small dashboard and deployment to a cloud platform.
+
+## CV wording (use only after you have run and verified the project)
+
+**EuroData Pipeline & Analytics API | Python, SQL, FastAPI, SQLAlchemy, PostgreSQL, Docker**
+- Built an ETL pipeline ingesting real ECB exchange-rate observations, validating and deduplicating records before idempotent database upserts.
+- Developed a REST API with date/currency filtering, pagination, latest-rate queries and health/summary endpoints.
+- Added automated tests and CI checks; packaged the API and PostgreSQL database with Docker Compose.
+
+Do not claim a record count, performance improvement, cloud deployment or production usage unless you measure and verify it yourself.

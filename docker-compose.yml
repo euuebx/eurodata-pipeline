@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: eurodata
+      POSTGRES_USER: eurodata
+      POSTGRES_PASSWORD: localdevpassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eurodata -d eurodata"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ingest:
+    build: .
+    command: ["python", "-m", "eurodata_pipeline.cli", "--verbose"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://eurodata:localdevpassword@db:5432/eurodata
+      ECB_START_DATE: "2020-01-01"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://eurodata:localdevpassword@db:5432/eurodata
+      ECB_START_DATE: "2020-01-01"
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

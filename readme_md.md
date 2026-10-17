@@ -1,0 +1,102 @@
+# EuroData Pipeline
+
+A small project that downloads daily exchange rates from the European Central Bank (ECB), stores them in a database, and serves them through a REST API.
+
+I built it to practise data pipelines and APIs in Python. I used AI tools (Claude) to help with parts of it and to debug.
+
+## What it does
+
+* Downloads daily rates for USD, GBP, JPY and CHF against the euro from the ECB Data Portal
+* Cleans the data (fixes types, drops bad rows and duplicates)
+* Saves it to a database. Running it again doesn't create duplicates, and if the ECB revises a value it gets updated
+* Serves the data through a FastAPI app with filtering and pagination
+
+Rates are quoted as units of foreign currency per 1 EUR, so a USD rate of 1.12 means 1 EUR = 1.12 USD.
+
+## Tech used
+
+Python, FastAPI, SQLAlchemy, pandas, requests, SQLite, pytest, Ruff, GitHub Actions. PostgreSQL is supported through the `DATABASE_URL` setting.
+
+## How to run it (Windows, PowerShell)
+
+You need Python 3.11 or newer and an internet connection.
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+```
+
+If PowerShell blocks the activate script, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once and try again.
+
+Load the data (this creates `eurodata.db` in the project folder):
+
+```powershell
+python -m eurodata_pipeline.cli --start-date 2020-01-01 --verbose
+```
+
+Start the API:
+
+```powershell
+uvicorn eurodata_pipeline.api:app --reload
+```
+
+Then open `http://127.0.0.1:8000/docs` to try the endpoints. Run all commands from the project folder, because the database path is relative.
+
+## Endpoints
+
+| Endpoint | What it does |
+| :--- | :--- |
+| `GET /health` | Checks the API can reach the database |
+| `GET /v1/rates` | List rates. Filter by currency, start_date, end_date. Use limit (1 to 1000) and offset for pages |
+| `GET /v1/rates/latest` | Most recent rate for each currency |
+| `GET /v1/summary` | Number of rows, currencies, and first and last date |
+
+If `start_date` is after `end_date`, `/v1/rates` returns a 422 error.
+
+## Tests
+
+```powershell
+pytest -q
+ruff check src tests
+```
+
+The tests use an in-memory SQLite database with a few made-up rows, so they don't need internet. These rows are only for testing. The real data in the database comes from the ECB.
+
+GitHub Actions runs the tests and Ruff on every push.
+
+## Project layout
+
+```text
+src/eurodata_pipeline/
+    api.py        FastAPI routes
+    cli.py        command to run the ingestion
+    config.py     settings (database URL, start date, timeout)
+    db.py         database engine and sessions
+    models.py     table definition
+    pipeline.py   download, clean, and save the data
+tests/
+    test_api.py
+    test_pipeline.py
+```
+
+The table has a unique constraint on `(currency, observation_date)`. This is what stops duplicate rows when the pipeline is run more than once.
+
+## Limitations
+
+* No login or authentication, so it's only meant for local use
+* It only keeps the latest value the ECB gives, not a history of revisions
+* There's no scheduler. You have to run the ingestion command yourself to get new days
+* Only four currencies
+* There is a Dockerfile and docker-compose.yml for running with PostgreSQL, but I haven't tested them yet
+
+## Ideas for later
+
+* Add a stats endpoint (min, max, mean, volatility)
+* Look at how the currencies move together
+* Run the ingestion on a schedule
+* Test the Docker setup and add database migrations
+
+## Data source
+
+ECB Data Portal API
